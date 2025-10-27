@@ -8,12 +8,12 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.tooling.preview.Preview
 import org.assidious.superlocal.feature.auth.AuthViewModel
-import org.assidious.superlocal.feature.auth.LoginScreen
+import org.assidious.superlocal.feature.auth.AuthScreen
 
 class MainActivity : ComponentActivity() {
     private val vm by lazy { AuthViewModel() }
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContent { MaterialTheme { LoginScreen(vm) } }
+        setContent { AppRoot() }
     }
 }

@@ -2,20 +2,77 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import java.util.Properties
 
 
+// --- Generate Env.kt from local.properties into build/ (not in VCS) ---
+//import java.util.Properties
+
+val props = Properties().apply {
+    val f = rootProject.file("local.properties")
+    if (f.exists()) f.inputStream().use { load(it) }
+}
+
+val genDir = layout.buildDirectory.dir("generated/env/commonMain/kotlin")
+val generateEnv by tasks.registering {
+    // Fail fast if missing
+    val url = props.getProperty("SUPABASE_URL")
+        ?: error("Missing SUPABASE_URL in local.properties")
+    val key = props.getProperty("SUPABASE_ANON_KEY")
+        ?: error("Missing SUPABASE_ANON_KEY in local.properties")
+
+    outputs.dir(genDir)
+
+    doLast {
+        val pkg = "org.assidious.superlocal.config"
+        val outFile = genDir.get().file("${pkg.replace('.', '/')}/Env.kt").asFile
+        outFile.parentFile.mkdirs()
+        outFile.writeText(
+            """
+            package $pkg
+
+            // Auto-generated from local.properties during build
+            object Env {
+                const val SUPABASE_URL = "$url"
+                const val SUPABASE_ANON_KEY = "$key"
+            }
+            """.trimIndent()
+        )
+    }
+}
+
+// Make the generated dir part of commonMain sources
+kotlin.sourceSets.getByName("commonMain").kotlin.srcDir(genDir)
+
+// Ensure generation happens before any Kotlin compilation (Android/iOS)
+tasks.configureEach {
+    if (name.contains("Kotlin", ignoreCase = true)) {
+        dependsOn(generateEnv)
+    }
+}
+// Also make Android's preBuild depend on it (handy in Android Studio)
+tasks.matching { it.name == "preBuild" }.configureEach {
+    dependsOn(generateEnv)
+}
+
+
+
 plugins {
     alias(libs.plugins.kotlinMultiplatform)
     alias(libs.plugins.androidApplication)
     alias(libs.plugins.composeMultiplatform)
     alias(libs.plugins.composeCompiler)
-}
+    alias(libs.plugins.kotlin.serialization)
+    //id("com.codingfeline.buildkonfig") version "0.15.1"
 
-// ---- Versions used for new deps (safe to tweak later) ----
-val ktor = "3.3.1"      // <— was 2.3.10, must match Supabase (Ktor 3)
+
+}
+//kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
+// ---- Versions (single source of truth) ----
+val ktor = "3.3.1"
 val coroutines = "1.9.0"
 val serializationJson = "1.7.3"
-val supabase = "3.2.5"  // you already use 3.2.5 in code; keep this
+val supabase = "3.2.5"
+
 kotlin {
-    // Android target (keeps the warning away)
+    // ✅ Register Android target (removes your warning)
     androidTarget {
         compilerOptions { jvmTarget.set(JvmTarget.JVM_11) }
     }
@@ -23,7 +80,7 @@ kotlin {
     // iOS targets
     iosArm64()
     iosSimulatorArm64()
-
+    val voyager = "1.0.0"
     sourceSets {
         // ---------- Common ----------
         val commonMain by getting {
@@ -38,22 +95,30 @@ kotlin {
                 implementation(libs.androidx.lifecycle.viewmodelCompose)
                 implementation(libs.androidx.lifecycle.runtimeCompose)
 
-                // Supabase (no BOM in KMP common)
-                val supabase = "3.2.5"
+                // ❌ REMOVE BOM / platform(...) — not supported here
+                // implementation(platform("io.github.jan-tennert.supabase:bom:3.2.5"))
 
+                // ✅ Pin Supabase modules explicitly to the same version
                 implementation("io.github.jan-tennert.supabase:auth-kt:$supabase")
                 implementation("io.github.jan-tennert.supabase:postgrest-kt:$supabase")
-                implementation("io.github.jan-tennert.supabase:storage-kt:$supabase")
-
 
                 // Ktor core + JSON
                 implementation("io.ktor:ktor-client-core:$ktor")
                 implementation("io.ktor:ktor-client-content-negotiation:$ktor")
                 implementation("io.ktor:ktor-serialization-kotlinx-json:$ktor")
 
-                // Coroutines + JSON lib
+                // Coroutines + Serialization
                 implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:$coroutines")
                 implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:$serializationJson")
+
+                //voyager nav
+                implementation("cafe.adriel.voyager:voyager-navigator:${voyager}")
+                implementation("cafe.adriel.voyager:voyager-tab-navigator:${voyager}")
+                implementation("cafe.adriel.voyager:voyager-transitions:${voyager}")
+
+                implementation(compose.materialIconsExtended)
+                //russhwolf
+                implementation("com.russhwolf:multiplatform-settings:1.3.0")
             }
         }
 
@@ -62,16 +127,14 @@ kotlin {
             dependencies {
                 implementation(compose.preview)
                 implementation(libs.androidx.activity.compose)
-
-                // Put uiTooling here (NOT in a top-level dependencies block)
                 implementation(compose.uiTooling)
 
-                // Ktor Android engine
+                // ✅ Use ONE Ktor version; OkHttp is the typical Android engine
                 implementation("io.ktor:ktor-client-okhttp:$ktor")
             }
         }
 
-        // ---------- iOS (use concrete sets; don't reference iosMain) ----------
+        // ---------- iOS ----------
         val iosArm64Main by getting {
             dependencies {
                 implementation("io.ktor:ktor-client-darwin:$ktor")
@@ -88,10 +151,7 @@ kotlin {
             dependencies { implementation(libs.kotlin.test) }
         }
     }
-  }
-
-
-
+}
 
 android {
     namespace = "org.assidious.superlocal"
@@ -104,21 +164,17 @@ android {
         versionCode = 1
         versionName = "1.0"
 
-        // Read SUPABASE_* from local.properties (safe if file is missing)
+        // Optional: read Supabase keys from local.properties
         val props = Properties().apply {
             val lp = rootProject.file("local.properties")
-            if (lp.exists()) {
-                lp.inputStream().use { load(it) }
-            }
+            if (lp.exists()) lp.inputStream().use { load(it) }
         }
-
         buildConfigField("String", "SUPABASE_URL", "\"${props.getProperty("SUPABASE_URL", "")}\"")
         buildConfigField("String", "SUPABASE_ANON_KEY", "\"${props.getProperty("SUPABASE_ANON_KEY", "")}\"")
+    }
 
-    }
-    buildFeatures {
-        buildConfig = true
-    }
+    buildFeatures { buildConfig = true }
+
     packaging {
         resources { excludes += "/META-INF/{AL2.0,LGPL2.1}" }
     }

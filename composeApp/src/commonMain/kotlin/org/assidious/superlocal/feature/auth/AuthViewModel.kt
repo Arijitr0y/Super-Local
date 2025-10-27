@@ -2,45 +2,79 @@ package org.assidious.superlocal.feature.auth
 
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import org.assidious.superlocal.data.AuthRepository
+import org.assidious.superlocal.data.AuthResult
 
 class AuthViewModel(
     private val repo: AuthRepository = AuthRepository(),
-    private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val scope: CoroutineScope = CoroutineScope(Dispatchers.Default + Job())
 ) {
-    private val _ui = MutableStateFlow(AuthUiState())
-    val ui: StateFlow<AuthUiState> = _ui.asStateFlow()
+    private val _state = MutableStateFlow(AuthUiState())
+    val state: StateFlow<AuthUiState> = _state
 
-    init {
+    fun onEmail(v: String)    { _state.value = _state.value.copy(email = v) }
+    fun onPassword(v: String) { _state.value = _state.value.copy(password = v) }
+
+    fun login() {
+        val s = _state.value
+        if (!s.email.contains('@')) {
+            _state.value = s.copy(error = "Enter a valid email"); return
+        }
+        if (s.password.length < 6) {
+            _state.value = s.copy(error = "Password must be at least 6 characters"); return
+        }
+        _state.value = s.copy(isLoading = true, error = null)
         scope.launch {
-            repo.isAuthenticated.collectLatest { loggedIn ->
-                _ui.value = _ui.value.copy(isLoggedIn = loggedIn, isLoading = false, error = null)
+            when (val res = repo.signIn(s.email.trim(), s.password)) {
+                is AuthResult.Success ->
+                    _state.value = _state.value.copy(
+                        isLoading = false,
+                        isLoggedIn = true,
+                        error = null,
+                        userEmail = s.email.trim()
+                    )
+                is AuthResult.NeedsEmailVerification ->
+                    _state.value = _state.value.copy(isLoading = false, error = res.message)
+                is AuthResult.Error ->
+                    _state.value = _state.value.copy(isLoading = false, error = res.message)
             }
         }
     }
 
-    fun signIn(email: String, password: String) = scope.launch {
-        _ui.value = _ui.value.copy(isLoading = true, error = null)
-        runCatching { repo.signIn(email, password) }
-            .onSuccess { _ui.value = _ui.value.copy(isLoading = false) }
-            .onFailure { e -> _ui.value = _ui.value.copy(isLoading = false, error = e.message) }
+    fun signup(fullName: String?) {
+        val s = _state.value
+        if (!s.email.contains('@')) {
+            _state.value = s.copy(error = "Enter a valid email"); return
+        }
+        if (s.password.length < 6) {
+            _state.value = s.copy(error = "Password must be at least 6 characters"); return
+        }
+        _state.value = s.copy(isLoading = true, error = null)
+        scope.launch {
+            when (val res = repo.signUp(s.email.trim(), s.password, fullName?.trim())) {
+                is AuthResult.Success ->
+                    _state.value = _state.value.copy(
+                        isLoading = false,
+                        isLoggedIn = true,
+                        error = null,
+                        userEmail = s.email.trim()
+                    )
+                is AuthResult.NeedsEmailVerification ->
+                    _state.value = _state.value.copy(isLoading = false, error = res.message)
+                is AuthResult.Error ->
+                    _state.value = _state.value.copy(isLoading = false, error = res.message)
+            }
+        }
     }
 
-    fun signUp(email: String, password: String) = scope.launch {
-        _ui.value = _ui.value.copy(isLoading = true, error = null)
-        runCatching { repo.signUp(email, password) }
-            .onSuccess { _ui.value = _ui.value.copy(isLoading = false) }
-            .onFailure { e -> _ui.value = _ui.value.copy(isLoading = false, error = e.message) }
-    }
-
-    fun signOut() = scope.launch {
-        runCatching { repo.signOut() }
-            .onFailure { e -> _ui.value = _ui.value.copy(error = e.message) }
+    fun logout() {
+        scope.launch {
+            repo.signOut()
+            _state.value = _state.value.copy(isLoggedIn = false, userEmail = null, error = "Signed out")
+        }
     }
 }

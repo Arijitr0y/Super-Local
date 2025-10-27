@@ -1,38 +1,52 @@
-// composeApp/src/commonMain/kotlin/org/assidious/superlocal/data/AuthRepository.kt
 package org.assidious.superlocal.data
 
-import io.github.jan.supabase.SupabaseClient
+//import io.github.jan.supabase.auth.
 import io.github.jan.supabase.auth.auth
 import io.github.jan.supabase.auth.providers.builtin.Email
-import io.github.jan.supabase.auth.status.SessionStatus
-import io.github.jan.supabase.auth.user.UserInfo
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.map
 import org.assidious.superlocal.network.SupabaseClientProvider
+import kotlinx.serialization.json.put
+
+sealed interface AuthResult {
+    data object Success : AuthResult
+    data class NeedsEmailVerification(val message: String? = null) : AuthResult
+    data class Error(val message: String) : AuthResult
+}
 
 class AuthRepository(
-    private val client: SupabaseClient = SupabaseClientProvider.client
+    private val provider: SupabaseClientProvider = SupabaseClientProvider
 ) {
-    val isAuthenticated: Flow<Boolean> =
-        client.auth.sessionStatus.map { it is SessionStatus.Authenticated }
+    private val auth get() = provider.client.auth
 
-    suspend fun signUp(email: String, password: String) {
-        client.auth.signUpWith(Email) {
-            this.email = email
-            this.password = password
+    suspend fun signUp(email: String, password: String, fullName: String?): AuthResult {
+        return try {
+            val userOrNull = auth.signUpWith(Email) {
+                this.email = email
+                this.password = password
+                if (!fullName.isNullOrBlank()) data = kotlinx.serialization.json.buildJsonObject {
+                    put("full_name", fullName)
+                }
+            }
+            if (userOrNull == null) AuthResult.Success
+            else AuthResult.NeedsEmailVerification("Check your email to verify your account.")
+        } catch (t: Throwable) {
+            AuthResult.Error(t.message ?: "Sign up failed")
         }
     }
 
-    suspend fun signIn(email: String, password: String) {
-        client.auth.signInWith(Email) {
-            this.email = email
-            this.password = password
+    suspend fun signIn(email: String, password: String): AuthResult {
+        return try {
+            auth.signInWith(Email) {
+                this.email = email
+                this.password = password
+            }
+            AuthResult.Success
+        } catch (t: Throwable) {
+            val msg = t.message ?: "Login failed"
+            val needsVerify = msg.contains("confirm", true) || msg.contains("verify", true)
+            if (needsVerify) AuthResult.NeedsEmailVerification("Please verify your email, then try logging in.")
+            else AuthResult.Error(msg)
         }
     }
 
-    suspend fun signOut() {
-        client.auth.signOut()
-    }
-
-    fun currentUser(): UserInfo? = client.auth.currentUserOrNull()
+    suspend fun signOut(): Result<Unit> = runCatching { auth.signOut() }
 }
