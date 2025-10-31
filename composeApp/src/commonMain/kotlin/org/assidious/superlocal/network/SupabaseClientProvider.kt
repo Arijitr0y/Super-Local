@@ -1,22 +1,34 @@
-// composeApp/src/commonMain/kotlin/org/assidious/superlocal/network/SupabaseClientProvider.kt
+// org/assidious/superlocal/network/SupabaseClientProvider.kt
 package org.assidious.superlocal.network
 
 import io.github.jan.supabase.SupabaseClient
 import io.github.jan.supabase.createSupabaseClient
 import io.github.jan.supabase.auth.Auth
+import io.github.jan.supabase.auth.auth
+import io.github.jan.supabase.postgrest.Postgrest
+import io.github.jan.supabase.storage.Storage
 import org.assidious.superlocal.config.Env
 
 object SupabaseClientProvider {
 
-    // Single shared client for KMP
+    private fun requireOk(url: String, key: String) {
+        require(url.isNotBlank()) { "SUPABASE_URL missing" }
+        require(url.startsWith("https://")) { "SUPABASE_URL must start with https://" }
+        require(!url.endsWith("/")) { "SUPABASE_URL must not have trailing /" }
+        require(key.isNotBlank()) { "SUPABASE_ANON_KEY missing" }
+    }
+
     val client: SupabaseClient by lazy {
-        createSupabaseClient(
-            supabaseUrl = Env.SUPABASE_URL,
-            supabaseKey = Env.SUPABASE_ANON_KEY
-        ) {
-            // GoTrue (Auth) plugin. No tokens here.
+        val url = Env.SUPABASE_URL
+        val key = Env.SUPABASE_ANON_KEY
+        requireOk(url, key)
+
+        createSupabaseClient(supabaseUrl = url, supabaseKey = key) {
             install(Auth)
-            // If you use Postgrest/Storage etc, add install(Postgrest) / install(Storage) here
+            install(Postgrest)
+            install(Storage)
         }
     }
+
+    val auth get() = client.auth
 }

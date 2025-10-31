@@ -94,13 +94,16 @@ kotlin {
                 implementation(compose.components.uiToolingPreview)
                 implementation(libs.androidx.lifecycle.viewmodelCompose)
                 implementation(libs.androidx.lifecycle.runtimeCompose)
-
+                implementation(compose.runtime)
                 // ❌ REMOVE BOM / platform(...) — not supported here
                 // implementation(platform("io.github.jan-tennert.supabase:bom:3.2.5"))
 
                 // ✅ Pin Supabase modules explicitly to the same version
-                implementation("io.github.jan-tennert.supabase:auth-kt:$supabase")
-                implementation("io.github.jan-tennert.supabase:postgrest-kt:$supabase")
+                val supabaseVersion = "3.0.1"
+
+                implementation("io.github.jan-tennert.supabase:auth-kt:$supabaseVersion")
+                implementation("io.github.jan-tennert.supabase:postgrest-kt:$supabaseVersion")
+                implementation("io.github.jan-tennert.supabase:storage-kt:$supabaseVersion")
 
                 // Ktor core + JSON
                 implementation("io.ktor:ktor-client-core:$ktor")
